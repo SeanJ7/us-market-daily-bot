@@ -573,7 +573,7 @@ def trend_label(snapshot: QuoteSnapshot) -> str:
     return "需要观察"
 
 
-def build_report() -> Tuple[str, str]:
+def build_report_messages() -> Tuple[str, List[str]]:
     index_quotes = fetch_many(INDEX_SYMBOLS)
     sector_quotes = fetch_many(SECTOR_SYMBOLS)
     theme_quotes = fetch_many(THEME_SYMBOLS)
@@ -662,326 +662,117 @@ def build_report() -> Tuple[str, str]:
         snap = asset_quotes[name]
         asset_table.append("| {0} | {1} | {2} |".format(name, fmt_num(snap.close), fmt_pct(snap.day_change_pct)))
 
-    section_lines = [
-        title,
-        "",
-        "1分钟结论",
-        "",
-        "- 标普500 {0}、纳指 {1}、道指 {2}，当前大盘状态是 {3}。".format(
-            safe_change_label(sp.day_change_pct),
-            safe_change_label(nasdaq.day_change_pct),
-            safe_change_label(dow.day_change_pct),
-            market_state,
-        ),
-        "- 当天最强大盘风格是 Russell 2000 {0}，显示小盘风险偏好 {1}。".format(
-            fmt_pct(russell.day_change_pct),
-            "回升" if (russell.day_change_pct or 0) > 0 else "走弱",
-        ),
-        "- 半导体代理指标 SOXX {0}，相对 QQQ {1}，AI 硬件主线 {2}。".format(
-            fmt_pct(soxx.day_change_pct),
-            "更强" if (soxx.day_change_pct or 0) > (qqq.day_change_pct or 0) else "不占优",
-            "仍占主导" if (soxx.day_change_pct or 0) > 0 else "转弱",
-        ),
-        "- 美债方面，10Y 收在 {0}% ，对成长股估值的压力判断为 {1}。".format(
-            fmt_num(latest_10y),
-            "缓和" if latest_10y is not None and latest_10y < 4.6 else "仍需警惕",
-        ),
-        "- 最强板块：{0}。最弱板块：{1}。".format(strongest_sector, weakest_sector),
-        "- 七巨头内部最强的是：{0}；最弱的是：{1}。".format(mega_ranked[0], mega_ranked[-1]),
-        "- 市场宽度代理看，IWM {0}、RSP {1}，扩散力度 {2}。".format(
-            fmt_pct(iwm.day_change_pct),
-            fmt_pct(theme_quotes["等权标普"].day_change_pct),
-            "改善" if (iwm.day_change_pct or 0) > 0 and (theme_quotes["等权标普"].day_change_pct or 0) > 0 else "有限",
-        ),
-        "- 今日市场状态：{0}。".format(market_state),
-        "",
-        "表格化速览",
-        "",
-        *index_table,
-        "",
-        *yield_table,
-        "",
-        *asset_table,
-        "",
-        "买方晨报评分卡",
-        "",
-        "- 指数强度：{0}/5。标普 {1}，纳指 {2}。".format(4 if (sp.day_change_pct or 0) > 0 else 2, fmt_pct(sp.day_change_pct), fmt_pct(nasdaq.day_change_pct)),
-        "- 市场宽度：{0}/5。IWM {1}，RSP {2}。".format(4 if (iwm.day_change_pct or 0) > 0 and (theme_quotes['等权标普'].day_change_pct or 0) > 0 else 2, fmt_pct(iwm.day_change_pct), fmt_pct(theme_quotes["等权标普"].day_change_pct)),
-        "- AI主线强度：{0}/5。SOXX {1}，SMH {2}。".format(5 if (soxx.day_change_pct or 0) > 1 else 3, fmt_pct(soxx.day_change_pct), fmt_pct(theme_quotes["半导体"].day_change_pct)),
-        "- 软件相对强弱：{0}/5。IGV {1}。".format(4 if (theme_quotes["软件"].day_change_pct or 0) > (sp.day_change_pct or 0) else 2, fmt_pct(theme_quotes["软件"].day_change_pct)),
-        "- 半导体拥挤度：{0}/5。SOXX 近1月 {1}。".format(4 if (soxx.trailing_return(21) or 0) > 10 else 3, fmt_pct(soxx.trailing_return(21))),
-        "- 利率压力：{0}/5。10Y {1}% 。".format(2 if latest_10y is not None and latest_10y < 4.6 else 4, fmt_num(latest_10y)),
-        "- 风险偏好：{0}/5。QQQ {1}，IWM {2}。".format(4 if (qqq.day_change_pct or 0) > 0 and (iwm.day_change_pct or 0) > 0 else 2, fmt_pct(qqq.day_change_pct), fmt_pct(iwm.day_change_pct)),
-        "- 财报风险：3/5。暂无可靠当日财报总表，保持谨慎。".format(),
-        "- 短线可操作性：{0}/5。".format(3 if (abs(soxx.day_change_pct or 0) < 3 and abs(qqq.day_change_pct or 0) < 2) else 2),
-        "- 总判断标签：{0}".format("强趋势上涨" if (sp.day_change_pct or 0) > 0 and (nasdaq.day_change_pct or 0) > 0 else "高位震荡"),
-        "",
-        "仓位温度计",
-        "",
-        "- 当前温度：{0}。".format("中高" if (sp.day_change_pct or 0) > 0 and (nasdaq.day_change_pct or 0) > 0 else "中"),
-        "- 依据：指数方向 {0}，宽度代理 {1}，10Y 利率 {2}%，半导体近1月 {3}。".format(
-            "偏强" if (sp.day_change_pct or 0) > 0 else "偏弱",
-            "改善" if (iwm.day_change_pct or 0) > 0 else "偏弱",
-            fmt_num(latest_10y),
-            fmt_pct(soxx.trailing_return(21)),
-        ),
-        "",
-        "次日三种情景推演",
-        "",
-        "- 乐观情景：10Y 继续压在 4.60% 下方，QQQ 与 SOXX 继续跑赢，软件 IGV 开始补涨。需要观察：QQQ、SOXX、IGV、IWM 同步翻红。",
-        "- 中性情景：指数窄幅震荡，半导体维持主线但涨速放缓，资金向软件、工业、公用事业轮动。需要观察：XLK 相对 XLI、XLU 的强弱切换。",
-        "- 风险情景：10Y 上冲 4.60%-4.70%，VIX 抬升，SOXX 转弱，QQQ 失守近10日支撑。需要回避：高贝塔半导体和短线过热个股。",
-        "",
-        "可交易清单",
-        "",
-        *["- {0}".format(line) for line in focus_ranked[:8]],
-        "",
-        "禁止追高清单",
-        "",
-        *["- {0}".format(line) for line in focus_ranked[:5] if "短线过热" in line or True][:5],
-        "",
-        "0. 今日一句话总结",
-        "",
-        "昨夜美股的核心是 {0}：标普 {1}、纳指 {2}、Russell 2000 {3}，而 SOXX {4}，说明 {5}。".format(
-            market_state,
-            fmt_pct(sp.day_change_pct),
-            fmt_pct(nasdaq.day_change_pct),
-            fmt_pct(russell.day_change_pct),
-            fmt_pct(soxx.day_change_pct),
-            "AI 硬件仍是交易主线" if (soxx.day_change_pct or 0) >= (qqq.day_change_pct or 0) else "主线开始分散",
-        ),
-        "",
-        "1. 大盘表现总览",
-        "",
-        *index_table,
-        "",
-        "补充判断：",
-        "",
-        "- 标普和纳指是否新高：脚本当前未接入正式高点数据库，暂无可靠数据；但可通过近3个月价格趋势判断是否接近阶段高位。",
-        "- 纳指是否明显强于标普：{0}。".format("是" if (nasdaq.day_change_pct or 0) > (sp.day_change_pct or 0) else "否"),
-        "- 小盘 Russell 2000 是否跑赢：{0}。".format("是" if (russell.day_change_pct or 0) > (sp.day_change_pct or 0) else "否"),
-        "- 半导体是否继续领先：{0}。".format("是" if (soxx.day_change_pct or 0) > (qqq.day_change_pct or 0) else "否"),
-        "- VIX 当前状态：{0}。".format(fmt_pct(index_quotes["VIX"].day_change_pct)),
-        "",
-        "2. 盘中走势复盘",
-        "",
-        "- 盘前至收盘的精细时间线：暂无可靠逐分钟新闻与交易记录，本地脚本当前不编造。",
-        "- 当天涨跌核心原因：从价格结构看，最主要的驱动来自指数、半导体、成长风格和利率的共振变化。",
-        "- 当天交易风格判断：{0}。".format("risk-on" if (qqq.day_change_pct or 0) > 0 and (iwm.day_change_pct or 0) > 0 else "risk-off / mixed"),
-        "",
-        "3. 宏观环境",
-        "",
-        "3.1 美债收益率",
-        "",
-        *yield_table,
-        "",
-        "- 10Y 是否接近 4.5% / 4.6% / 4.7% 压力位：当前在 {0}% ，{1}。".format(
-            fmt_num(latest_10y),
-            "已逼近或触及 4.5% 关口" if latest_10y is not None and latest_10y >= 4.5 else "尚低于 4.5%",
-        ),
-        "- 长端利率对科技股估值：{0}。".format("压力可控" if latest_10y is not None and latest_10y < 4.6 else "需要警惕"),
-        "- 曲线形态：2Y-10Y {0}bp，10Y-30Y {1}bp。".format(fmt_num(curve_2_10), fmt_num(curve_10_30)),
-        "",
-        "3.2 Fed 降息预期",
-        "",
-        "- 暂无可靠 FedWatch 无授权快照，本地脚本当前不编造。",
-        "",
-        "3.3 美元、黄金、原油、比特币",
-        "",
-        *asset_table,
-        "",
-        "3.4 当日重要经济数据",
-        "",
-        "- 暂无可靠日历级宏观数据汇总，本地脚本当前不编造。",
-        "",
-        "4. 板块表现",
-        "",
-        *["- {0}".format(line) for line in ranking_lines(sector_quotes, include_periods=True)],
-        "",
-        "5. 主题与风格表现",
-        "",
-        *["- {0}".format(line) for line in ranking_lines(theme_quotes, include_periods=True)],
-        "",
-        "6. 市场宽度与参与度",
-        "",
-        "- 高于 20/50/100/200 日均线比例：暂无可靠全市场成分股数据。",
-        "- 用 ETF 代理观察：RSP {0}，IWM {1}，IWO {2}，IWN {3}。".format(
-            fmt_pct(theme_quotes["等权标普"].day_change_pct),
-            fmt_pct(iwm.day_change_pct),
-            fmt_pct(theme_quotes["小盘成长"].day_change_pct),
-            fmt_pct(theme_quotes["小盘价值"].day_change_pct),
-        ),
-        "- 涨跌家数、新高新低、A/D line、McClellan Oscillator、VVIX、MOVE、信用利差：暂无可靠数据。",
-        "",
-        "7. 技术面分析",
-        "",
-    ]
+    score_index = 4 if (sp.day_change_pct or 0) > 0 and (nasdaq.day_change_pct or 0) > 0 else 2
+    score_breadth = 4 if (iwm.day_change_pct or 0) > 0 and (theme_quotes["等权标普"].day_change_pct or 0) > 0 else 2
+    score_ai = 5 if (soxx.day_change_pct or 0) > 1 else 3
+    score_software = 4 if (theme_quotes["软件"].day_change_pct or 0) > (sp.day_change_pct or 0) else 2
+    score_rates = 2 if latest_10y is not None and latest_10y < 4.6 else 4
+    stage = "强趋势上涨" if (sp.day_change_pct or 0) > 0 and (nasdaq.day_change_pct or 0) > 0 else "高位震荡"
 
-    for label, snap in [("SPY", fetch_yahoo_chart("SPY")), ("QQQ", qqq), ("IWM", iwm), ("SMH", theme_quotes["半导体"]), ("IGV", theme_quotes["软件"]), ("XLK", sector_quotes["信息技术"]), ("XLC", sector_quotes["通信服务"]), ("XLY", sector_quotes["可选消费"])]:
-        support, resistance = compute_support_resistance(snap)
-        section_lines.append(
-            "- {0} 当前 {1}，20日/50日均线暂无可靠精算，近5日 {2}，近1月 {3}，支撑 {4}，压力 {5}。".format(
-                label,
-                fmt_num(snap.close),
-                fmt_pct(snap.trailing_return(5)),
-                fmt_pct(snap.trailing_return(21)),
-                support,
-                resistance,
-            )
-        )
-
-    section_lines.extend(
+    msg1 = "\n".join(
         [
+            title,
             "",
-            "8. 重点个股新闻与异动",
+            "🚦盘后总信号",
+            "阶段：{0}".format(stage),
+            "状态：{0}".format(market_state),
+            "仓位温度：{0}".format("中高" if stage == "强趋势上涨" else "中"),
             "",
-            "8.1 大型科技七巨头",
+            "⚡1分钟核心结论",
+            "1. 标普：{0}，纳指：{1}。".format(fmt_pct(sp.day_change_pct), fmt_pct(nasdaq.day_change_pct)),
+            "2. QQQ：{0}，SOXX：{1}。".format(fmt_pct(qqq.day_change_pct), fmt_pct(soxx.day_change_pct)),
+            "3. 小盘 IWM：{0}，宽度 {1}。".format(fmt_pct(iwm.day_change_pct), "改善" if score_breadth >= 4 else "一般"),
+            "4. 10Y 美债：{0}%。".format(fmt_num(latest_10y)),
+            "5. DXY：{0}，BTC：{1}。".format(fmt_pct(asset_quotes["DXY 美元指数"].day_change_pct), fmt_pct(asset_quotes["比特币"].day_change_pct)),
+            "6. 最强板块：{0}".format(strongest_sector),
+            "7. 最弱板块：{0}".format(weakest_sector),
+            "8. 七巨头最强：{0}".format(mega_ranked[0]),
+            "9. 七巨头最弱：{0}".format(mega_ranked[-1]),
             "",
-            *["- {0}".format(line) for line in mega_ranked],
+            "🧭交易方向评分",
+            "指数强度：{0}/5".format(score_index),
+            "市场宽度：{0}/5".format(score_breadth),
+            "AI主线：{0}/5".format(score_ai),
+            "软件强弱：{0}/5".format(score_software),
+            "利率压力：{0}/5".format(score_rates),
             "",
-            "8.2 AI 硬件 / 半导体",
-            "",
-            *["- {0}".format(line) for line in ranking_lines({name: focus_quotes[name] for name in ['NVDA', 'AMD', 'AVGO', 'MRVL', 'ANET', 'VRT'] if name in focus_quotes})],
-            "",
-            "8.3 软件 / SaaS / AI 应用",
-            "",
-            *["- {0}".format(line) for line in ranking_lines({name: focus_quotes[name] for name in ['CRM', 'NOW', 'SNOW', 'ADBE', 'PANW', 'CRWD', 'PLTR', 'DDOG', 'NET'] if name in focus_quotes})],
-            "",
-            "8.4 AI 电力 / 数据中心 / 能源基础设施",
-            "",
-            *["- {0}".format(line) for line in ranking_lines({name: focus_quotes[name] for name in ['CEG', 'VST', 'ETN', 'PWR', 'VRT', 'FLNC', 'OKLO', 'GEV', 'APLD', 'IREN'] if name in focus_quotes})],
-            "",
-            "8.5 其他显著异动",
-            "",
-            "- 分析师评级、并购、SEC 调查、盘后财报：本地脚本当前未接入可靠实时新闻源，统一标注为暂无可靠数据。",
-            "",
-            "9. 财报日历与财报解读",
-            "",
-            "- 昨夜已公布重点财报：暂无可靠自动抓取源。",
-            "- 接下来 1-3 个交易日重要财报：暂无可靠自动抓取源，建议以 Nasdaq / 公司 IR 官网为准。",
-            "",
-            "10. 机构观点与资金流",
-            "",
-            "- 华尔街大行观点、目标点位调整、ETF 资金流、期权异动：暂无可靠自动抓取源。",
-            "",
-            "11. 板块轮动判断",
-            "",
-            "- 当前更像：{0}。".format("AI 硬件主升浪" if (soxx.day_change_pct or 0) > 0 and (theme_quotes["软件"].day_change_pct or 0) < (soxx.day_change_pct or 0) else "板块轮动"),
-            "- 今天资金主要流入：{0}。".format(strongest_sector),
-            "- 今天资金主要流出：{0}。".format(weakest_sector),
-            "- AI 主线是否健康：{0}。".format("仍然健康" if (soxx.day_change_pct or 0) > 0 else "需要观察"),
-            "- 软件是否开始相对走强：{0}。".format("是" if (theme_quotes["软件"].day_change_pct or 0) > (sp.day_change_pct or 0) else "否"),
-            "- 小盘是否参与：{0}。".format("是" if (iwm.day_change_pct or 0) > 0 else "否"),
-            "",
-            "12. 我的重点关注股观察",
-            "",
+            "一句话：指数{0}、宽度{1}、AI主线{2}。".format(
+                "偏强" if score_index >= 4 else "一般",
+                "改善" if score_breadth >= 4 else "有限",
+                "仍主导" if score_ai >= 5 else "可观察轮动",
+            ),
         ]
     )
 
-    ordered_focus = [
-        "NVDA", "AMD", "AVGO", "MRVL", "GOOGL", "MSFT", "META", "AMZN", "ORCL",
-        "CRM", "NOW", "SNOW", "ADBE", "PANW", "CRWD", "PLTR", "DDOG", "NET",
-        "LITE", "COHR", "AAOI", "TSEM", "SIVE", "ANET",
-        "FLNC", "OKLO", "VST", "CEG", "ETN", "VRT", "PWR", "GEV", "APLD", "IREN",
-    ]
-    for name in ordered_focus:
-        snap = focus_quotes[name]
-        support, resistance = compute_support_resistance(snap)
-        section_lines.append(
-            "- {0}：{1}｜当日 {2}｜支撑 {3}｜压力 {4}｜新闻：暂无可靠自动抓取｜判断：{5}".format(
-                name,
-                fmt_num(snap.close),
-                fmt_pct(snap.day_change_pct),
-                support,
-                resistance,
-                trend_label(snap),
-            )
-        )
-
-    section_lines.extend(
+    msg2 = "\n".join(
         [
+            "📊核心数据快照",
+            "美股：",
+            "- Dow {0}".format(fmt_pct(dow.day_change_pct)),
+            "- S&P 500 {0}".format(fmt_pct(sp.day_change_pct)),
+            "- Nasdaq {0}".format(fmt_pct(nasdaq.day_change_pct)),
+            "- QQQ {0} / IWM {1}".format(fmt_pct(qqq.day_change_pct), fmt_pct(iwm.day_change_pct)),
+            "- SOXX {0} / IGV {1}".format(fmt_pct(soxx.day_change_pct), fmt_pct(theme_quotes["软件"].day_change_pct)),
             "",
-            "13. 明日交易计划 / 观察清单",
+            "宏观：",
+            "- 2Y {0}% / 10Y {1}% / 30Y {2}%".format(fmt_num(latest_2y), fmt_num(latest_10y), fmt_num(latest_30y)),
+            "- DXY {0}".format(fmt_pct(asset_quotes["DXY 美元指数"].day_change_pct)),
+            "- 黄金 {0} / WTI {1}".format(fmt_pct(asset_quotes["黄金"].day_change_pct), fmt_pct(asset_quotes["WTI 原油"].day_change_pct)),
+            "- BTC {0} / ETH {1}".format(fmt_pct(asset_quotes["比特币"].day_change_pct), fmt_pct(asset_quotes["以太坊"].day_change_pct)),
             "",
-            "13.1 宏观观察",
-            "- 10Y 美债关键位置：4.50%、4.60%、4.70%。",
-            "- 美元指数方向：观察 DXY 美元指数 {0} 后是否延续。".format(fmt_pct(asset_quotes["DXY 美元指数"].day_change_pct)),
-            "- 油价 / 黄金 / VIX：重点观察 CL=F、GC=F、^VIX 是否同步走高。",
-            "- Fed 官员讲话 / 经济数据：暂无可靠自动日历，建议盘前二次确认。",
-            "",
-            "13.2 大盘观察",
-            "- SPY 支撑 / 压力：{0} / {1}。".format(*compute_support_resistance(fetch_yahoo_chart("SPY"))),
-            "- QQQ 支撑 / 压力：{0} / {1}。".format(*compute_support_resistance(qqq)),
-            "- SMH 是否继续强于 QQQ：{0}。".format("是" if (theme_quotes["半导体"].day_change_pct or 0) > (qqq.day_change_pct or 0) else "否"),
-            "- IGV 是否开始跑赢：{0}。".format("是" if (theme_quotes["软件"].day_change_pct or 0) > (sp.day_change_pct or 0) else "否"),
-            "- IWM 是否参与：{0}。".format("是" if (iwm.day_change_pct or 0) > 0 else "否"),
-            "",
-            "13.3 板块观察",
-            "- AI 硬件是否继续领涨：关注 SOXX、SMH。",
-            "- 软件是否补涨：关注 IGV、CRM、NOW、SNOW。",
-            "- 金融 / 工业 / 能源是否轮动：关注 XLF、XLI、XLE。",
-            "- 防御板块是否走强：关注 XLP、XLU。",
-            "",
-            "13.4 个股观察",
-            *["- {0}".format(line) for line in focus_ranked[:15]],
-            "",
-            "14. 风险提示",
-            "",
-            "| 风险维度 | 当前状态 | 风险等级 |",
-            "| --- | --- | --- |",
-            "| 宏观利率 | 10Y {0}% | {1} |".format(fmt_num(latest_10y), "中高" if latest_10y is not None and latest_10y >= 4.6 else "中"),
-            "| 市场宽度 | RSP {0} / IWM {1} | {2} |".format(fmt_pct(theme_quotes["等权标普"].day_change_pct), fmt_pct(iwm.day_change_pct), "中"),
-            "| AI 拥挤度 | SOXX 近1月 {0} | {1} |".format(fmt_pct(soxx.trailing_return(21)), "中高" if (soxx.trailing_return(21) or 0) > 10 else "中"),
-            "| 财报风险 | 暂无可靠自动抓取 | 中 |",
-            "| 地缘风险 | 暂无可靠自动抓取 | 中 |",
-            "| 技术面 | 指数与主题波动仍大 | 中高 |",
-            "| 流动性 | 暂无可靠恶化信号 | 中 |",
-            "",
-            "15. 最终结论",
-            "",
-            "今日市场结论",
-            "",
-            "指数层面，标普 {0}、纳指 {1}、道指 {2}，市场呈现 {3}。半导体代理 SOXX {4}，说明 AI 主线 {5}。小盘 IWM {6}，反映市场宽度 {7}。".format(
-                fmt_pct(sp.day_change_pct),
-                fmt_pct(nasdaq.day_change_pct),
-                fmt_pct(dow.day_change_pct),
-                market_state,
-                fmt_pct(soxx.day_change_pct),
-                "偏强" if (soxx.day_change_pct or 0) > 0 else "偏弱",
-                fmt_pct(iwm.day_change_pct),
-                "改善" if (iwm.day_change_pct or 0) > 0 else "有限",
+            "板块与风格：",
+            *["- {0}".format(line) for line in ranking_lines(sector_quotes, include_periods=False)[:5]],
+            "- 软件 IGV {0}，等权 RSP {1}。".format(
+                fmt_pct(theme_quotes["软件"].day_change_pct),
+                fmt_pct(theme_quotes["等权标普"].day_change_pct),
             ),
             "",
-            "当前市场阶段",
-            "",
-            "{0}".format("强趋势上涨" if (sp.day_change_pct or 0) > 0 and (nasdaq.day_change_pct or 0) > 0 else "高位震荡"),
-            "",
-            "我的操作倾向",
-            "",
-            "- 是否适合追高：{0}。".format("不宜无条件追高" if (soxx.trailing_return(21) or 0) > 10 else "可小心观察趋势延续"),
-            "- 是否适合逢低：更适合等主线回踩关键支撑后再观察。",
-            "- 是否应该等待财报：是，尤其对高波动成长股。",
-            "- 是否应该控制仓位：若 10Y 上冲 4.60%-4.70%，建议更谨慎。",
-            "- 更值得关注的板块：半导体、软件、数据中心基础设施。",
-            "- 需要谨慎的板块：短线过热的高贝塔 AI 硬件。",
-            "",
-            "最值得关注的 5 个信号",
-            "",
-            "1. 10Y 美债是否突破 4.60%。",
-            "2. SOXX 是否继续强于 QQQ。",
-            "3. IGV 是否开始相对补涨。",
-            "4. IWM 与 RSP 是否继续同步走强。",
-            "5. NVDA、AVGO、MRVL、VRT、CEG 等主线个股是否维持高位结构。",
-            "",
-            "来源",
-            "",
-            "- Yahoo Finance Chart API（指数、ETF、个股、商品、加密）：https://finance.yahoo.com/",
-            "- FRED 官方收益率序列：DGS2 / DGS10 / DGS30 https://fred.stlouisfed.org/",
-            "- 若某项数据无法稳定获取，正文明确标注为“暂无可靠数据”。",
+            "重点股票：",
+            *["- {0}".format(line) for line in focus_ranked[:10]],
         ]
     )
 
-    return title, "\n".join(section_lines).strip() + "\n"
+    spy = fetch_yahoo_chart("SPY")
+    spy_support, spy_resistance = compute_support_resistance(spy)
+    qqq_support, qqq_resistance = compute_support_resistance(qqq)
+    smh_support, smh_resistance = compute_support_resistance(theme_quotes["半导体"])
+
+    msg3 = "\n".join(
+        [
+            "🧩交易计划与风险",
+            "多头更有利条件：",
+            "- QQQ 继续强于 SPY",
+            "- SOXX 继续强于 QQQ",
+            "- IWM 与 RSP 同步走强",
+            "- 10Y 不上破 4.60%",
+            "- 软件 IGV 开始补涨",
+            "",
+            "风险条件：",
+            "- 10Y 上冲 4.60%-4.70%",
+            "- SOXX 转弱且弱于 QQQ",
+            "- IWM 回落，宽度恶化",
+            "- DXY 走强压制风险偏好",
+            "- 高位半导体出现利好钝化",
+            "",
+            "关键位：",
+            "- SPY 支撑/压力：{0} / {1}".format(spy_support, spy_resistance),
+            "- QQQ 支撑/压力：{0} / {1}".format(qqq_support, qqq_resistance),
+            "- SMH 支撑/压力：{0} / {1}".format(smh_support, smh_resistance),
+            "",
+            "明日观察清单：",
+            "1. 10Y 美债是否再上 4.60%",
+            "2. SOXX 是否继续强于 QQQ",
+            "3. IGV 是否开始补涨",
+            "4. IWM / RSP 是否继续同步走强",
+            "5. NVDA / AVGO / MRVL / VRT / CEG 结构是否维持",
+            "",
+            "来源：",
+            "- Yahoo Finance: https://finance.yahoo.com/",
+            "- FRED: https://fred.stlouisfed.org/",
+        ]
+    )
+
+    return title, [msg1, msg2, msg3]
 
 
 def save_report_files(report_text: str, reports_dir: Path, report_date: str) -> Tuple[Path, Path]:
@@ -1018,8 +809,9 @@ def main() -> int:
             )
             return 0
 
-        title, report_text = build_report()
+        title, messages = build_report_messages()
         report_date = title.replace(REPORT_TITLE_PREFIX, "", 1)
+        report_text = "\n\n---\n\n".join(messages).strip() + "\n"
         reports_dir = Path(args.reports_dir).expanduser()
         markdown_path, html_path = save_report_files(report_text, reports_dir, report_date)
 
@@ -1033,7 +825,8 @@ def main() -> int:
             print("HTML saved to {0}".format(html_path))
             return 0
 
-        send_telegram_message(token, chat_id, report_text)
+        for message in messages:
+            send_telegram_message(token, chat_id, message)
         save_state(
             state_path,
             {
