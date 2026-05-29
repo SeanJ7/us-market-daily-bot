@@ -25,7 +25,11 @@ jobs:
 
       - name: Generate and send report
         run: |
-          python send_latest_report.py --schedule-guard
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            python send_latest_report.py --force
+          else
+            python send_latest_report.py --schedule-guard
+          fi
 
       - name: Upload report artifacts
         if: always()
