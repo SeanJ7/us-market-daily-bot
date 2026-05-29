@@ -573,7 +573,19 @@ def trend_label(snapshot: QuoteSnapshot) -> str:
     return "需要观察"
 
 
-def build_report_messages() -> Tuple[str, List[str]]:
+@dataclass
+class ReportDataset:
+    index_quotes: Dict[str, QuoteSnapshot]
+    sector_quotes: Dict[str, QuoteSnapshot]
+    theme_quotes: Dict[str, QuoteSnapshot]
+    asset_quotes: Dict[str, QuoteSnapshot]
+    mega_quotes: Dict[str, QuoteSnapshot]
+    focus_quotes: Dict[str, QuoteSnapshot]
+    yield_rows: Dict[str, Tuple[Optional[float], Optional[float]]]
+    latest_yield_date: Optional[datetime]
+
+
+def fetch_report_dataset() -> ReportDataset:
     index_quotes = fetch_many(INDEX_SYMBOLS)
     sector_quotes = fetch_many(SECTOR_SYMBOLS)
     theme_quotes = fetch_many(THEME_SYMBOLS)
@@ -588,6 +600,27 @@ def build_report_messages() -> Tuple[str, List[str]]:
         yield_rows[label] = (latest_val, prev_val)
         if latest_dt and (latest_yield_date is None or latest_dt > latest_yield_date):
             latest_yield_date = latest_dt
+
+    return ReportDataset(
+        index_quotes=index_quotes,
+        sector_quotes=sector_quotes,
+        theme_quotes=theme_quotes,
+        asset_quotes=asset_quotes,
+        mega_quotes=mega_quotes,
+        focus_quotes=focus_quotes,
+        yield_rows=yield_rows,
+        latest_yield_date=latest_yield_date,
+    )
+
+
+def build_report_messages(dataset: ReportDataset) -> Tuple[str, List[str]]:
+    index_quotes = dataset.index_quotes
+    sector_quotes = dataset.sector_quotes
+    theme_quotes = dataset.theme_quotes
+    asset_quotes = dataset.asset_quotes
+    mega_quotes = dataset.mega_quotes
+    focus_quotes = dataset.focus_quotes
+    yield_rows = dataset.yield_rows
 
     report_date = previous_trading_label(index_quotes["S&P 500"].history[-1][0])
     title = "{0}{1}".format(REPORT_TITLE_PREFIX, report_date)
@@ -775,6 +808,230 @@ def build_report_messages() -> Tuple[str, List[str]]:
     return title, [msg1, msg2, msg3]
 
 
+def build_detailed_report(dataset: ReportDataset) -> Tuple[str, str]:
+    index_quotes = dataset.index_quotes
+    sector_quotes = dataset.sector_quotes
+    theme_quotes = dataset.theme_quotes
+    asset_quotes = dataset.asset_quotes
+    mega_quotes = dataset.mega_quotes
+    focus_quotes = dataset.focus_quotes
+    yield_rows = dataset.yield_rows
+
+    report_date = previous_trading_label(index_quotes["S&P 500"].history[-1][0])
+    title = "{0}{1}".format(REPORT_TITLE_PREFIX, report_date)
+
+    sp = index_quotes["S&P 500"]
+    nasdaq = index_quotes["Nasdaq Composite"]
+    dow = index_quotes["Dow Jones"]
+    russell = index_quotes["Russell 2000"]
+    qqq = index_quotes["QQQ"]
+    iwm = index_quotes["IWM"]
+    soxx = index_quotes["SOXX"]
+    vix = index_quotes["VIX"]
+
+    latest_2y = yield_rows["2Y"][0]
+    latest_10y = yield_rows["10Y"][0]
+    latest_30y = yield_rows["30Y"][0]
+    curve_2_10 = None
+    curve_10_30 = None
+    if latest_2y is not None and latest_10y is not None:
+        curve_2_10 = (latest_10y - latest_2y) * 100
+    if latest_10y is not None and latest_30y is not None:
+        curve_10_30 = (latest_30y - latest_10y) * 100
+
+    strongest_sector = ranking_lines(sector_quotes)[0]
+    weakest_sector = ranking_lines(sector_quotes)[-1]
+    strongest_theme = ranking_lines(theme_quotes)[0]
+    weakest_theme = ranking_lines(theme_quotes)[-1]
+    market_state = derive_market_state(index_quotes, sector_quotes)
+
+    spy = fetch_yahoo_chart("SPY")
+    spy_support, spy_resistance = compute_support_resistance(spy)
+    qqq_support, qqq_resistance = compute_support_resistance(qqq)
+    smh_support, smh_resistance = compute_support_resistance(theme_quotes["半导体"])
+    igv_support, igv_resistance = compute_support_resistance(theme_quotes["软件"])
+
+    stage = "强趋势上涨" if (sp.day_change_pct or 0) > 0 and (nasdaq.day_change_pct or 0) > 0 else "高位震荡"
+    score_index = 4 if (sp.day_change_pct or 0) > 0 and (nasdaq.day_change_pct or 0) > 0 else 2
+    score_breadth = 4 if (iwm.day_change_pct or 0) > 0 and (theme_quotes["等权标普"].day_change_pct or 0) > 0 else 2
+    score_ai = 5 if (soxx.day_change_pct or 0) > 1 else 3
+    score_software = 4 if (theme_quotes["软件"].day_change_pct or 0) > (sp.day_change_pct or 0) else 2
+    score_rates = 2 if latest_10y is not None and latest_10y < 4.6 else 4
+
+    lines = [
+        title,
+        "",
+        "## 1分钟结论",
+        "- 指数表现：标普 {0}，纳指 {1}，小盘 IWM {2}。".format(
+            fmt_pct(sp.day_change_pct), fmt_pct(nasdaq.day_change_pct), fmt_pct(iwm.day_change_pct)
+        ),
+        "- 主线状态：{0}。".format(market_state),
+        "- 最强板块：{0}。".format(strongest_sector),
+        "- 最弱板块：{0}。".format(weakest_sector),
+        "- 利率与美元：10Y {0}%，DXY {1}。".format(
+            fmt_num(latest_10y), fmt_pct(asset_quotes["DXY 美元指数"].day_change_pct)
+        ),
+        "- 七巨头分化：最强 {0}；最弱 {1}。".format(
+            ranking_lines(mega_quotes)[0], ranking_lines(mega_quotes)[-1]
+        ),
+        "- 今日市场状态：{0}。".format("指数偏强但需看宽度跟进" if score_breadth < 4 else "指数与宽度共振，风险偏好改善"),
+        "",
+        "## 买方晨报评分卡",
+        "- 指数强度：{0}/5".format(score_index),
+        "- 市场宽度：{0}/5".format(score_breadth),
+        "- AI主线强度：{0}/5".format(score_ai),
+        "- 软件相对强弱：{0}/5".format(score_software),
+        "- 利率压力：{0}/5".format(score_rates),
+        "- 当前市场阶段：{0}".format(stage),
+        "",
+        "## 详细版",
+        "",
+        "### 0. 今日一句话总结",
+        "美股收盘后，标普 {0}、纳指 {1}，半导体 {2}，整体呈现 {3}。".format(
+            fmt_pct(sp.day_change_pct), fmt_pct(nasdaq.day_change_pct), fmt_pct(soxx.day_change_pct), market_state
+        ),
+        "",
+        "### 1. 大盘表现总览",
+        "- Dow Jones：{0}｜收盘 {1}｜高低 {2}/{3}".format(
+            fmt_pct(dow.day_change_pct), fmt_num(dow.close), fmt_num(dow.high), fmt_num(dow.low)
+        ),
+        "- S&P 500：{0}｜收盘 {1}｜近5日 {2}｜近1月 {3}".format(
+            fmt_pct(sp.day_change_pct), fmt_num(sp.close), fmt_pct(sp.trailing_return(5)), fmt_pct(sp.trailing_return(21))
+        ),
+        "- Nasdaq Composite：{0}｜收盘 {1}｜近5日 {2}｜近1月 {3}".format(
+            fmt_pct(nasdaq.day_change_pct), fmt_num(nasdaq.close), fmt_pct(nasdaq.trailing_return(5)), fmt_pct(nasdaq.trailing_return(21))
+        ),
+        "- QQQ：{0}｜收盘 {1}".format(fmt_pct(qqq.day_change_pct), fmt_num(qqq.close)),
+        "- Russell 2000：{0}｜收盘 {1}".format(fmt_pct(russell.day_change_pct), fmt_num(russell.close)),
+        "- SOXX：{0}｜收盘 {1}".format(fmt_pct(soxx.day_change_pct), fmt_num(soxx.close)),
+        "- VIX：{0}｜收盘 {1}".format(fmt_pct(vix.day_change_pct), fmt_num(vix.close)),
+        "",
+        "### 2. 盘中走势复盘",
+        "- 指数方向：标普 {0}，纳指 {1}，说明科技相对{2}。".format(
+            safe_change_label(sp.day_change_pct), safe_change_label(nasdaq.day_change_pct), "偏强" if (nasdaq.day_change_pct or 0) > (sp.day_change_pct or 0) else "一般"
+        ),
+        "- 小盘与等权：IWM {0}，RSP {1}，宽度{2}。".format(
+            fmt_pct(iwm.day_change_pct), fmt_pct(theme_quotes["等权标普"].day_change_pct), "改善" if score_breadth >= 4 else "仍有限"
+        ),
+        "- 半导体与软件：SMH {0}，IGV {1}，风格上更像{2}。".format(
+            fmt_pct(theme_quotes["半导体"].day_change_pct),
+            fmt_pct(theme_quotes["软件"].day_change_pct),
+            "AI硬件主导" if score_ai >= 5 else "向软件扩散"
+        ),
+        "",
+        "### 3. 宏观环境",
+        "- 2Y 美债：{0}%｜10Y：{1}%｜30Y：{2}%".format(fmt_num(latest_2y), fmt_num(latest_10y), fmt_num(latest_30y)),
+        "- 曲线：2Y-10Y {0}bp｜10Y-30Y {1}bp".format(fmt_num(curve_2_10), fmt_num(curve_10_30)),
+        "- DXY：{0}｜黄金：{1}｜WTI：{2}".format(
+            fmt_pct(asset_quotes["DXY 美元指数"].day_change_pct),
+            fmt_pct(asset_quotes["黄金"].day_change_pct),
+            fmt_pct(asset_quotes["WTI 原油"].day_change_pct),
+        ),
+        "- BTC：{0}｜ETH：{1}".format(
+            fmt_pct(asset_quotes["比特币"].day_change_pct),
+            fmt_pct(asset_quotes["以太坊"].day_change_pct),
+        ),
+        "- FedWatch / 当日宏观数据：暂无可靠数据。",
+        "",
+        "### 4. 板块表现",
+        "- 最强：{0}".format(strongest_sector),
+        "- 最弱：{0}".format(weakest_sector),
+        "- 近端领先板块：",
+        *["  - {0}".format(line) for line in ranking_lines(sector_quotes, include_periods=True)[:5]],
+        "",
+        "### 5. 主题与风格表现",
+        "- 最强主题：{0}".format(strongest_theme),
+        "- 最弱主题：{0}".format(weakest_theme),
+        "- 软件 IGV：{0}｜半导体 SMH：{1}｜等权 RSP：{2}".format(
+            fmt_pct(theme_quotes["软件"].day_change_pct),
+            fmt_pct(theme_quotes["半导体"].day_change_pct),
+            fmt_pct(theme_quotes["等权标普"].day_change_pct),
+        ),
+        "",
+        "### 6. 市场宽度与参与度",
+        "- IWM：{0}｜RSP：{1}。".format(fmt_pct(iwm.day_change_pct), fmt_pct(theme_quotes["等权标普"].day_change_pct)),
+        "- 宽度判断：{0}。".format("扩散中" if score_breadth >= 4 else "仍偏权重驱动"),
+        "- 20/50/100/200 日参与度：暂无可靠数据。",
+        "- 涨跌家数 / 新高新低：暂无可靠数据。",
+        "",
+        "### 7. 技术面分析",
+        "- SPY 支撑/压力：{0} / {1}".format(spy_support, spy_resistance),
+        "- QQQ 支撑/压力：{0} / {1}".format(qqq_support, qqq_resistance),
+        "- SMH 支撑/压力：{0} / {1}".format(smh_support, smh_resistance),
+        "- IGV 支撑/压力：{0} / {1}".format(igv_support, igv_resistance),
+        "- 技术结论：若 QQQ 继续强于 SPY、SMH 继续强于 QQQ，则趋势延续；反之先看高位震荡。",
+        "",
+        "### 8. 重点个股新闻与异动",
+        "- 七巨头排序：",
+        *["  - {0}".format(line) for line in ranking_lines(mega_quotes)],
+        "- 重点关注股前十：",
+        *["  - {0}".format(line) for line in ranking_lines(focus_quotes)[:10]],
+        "- 公司新闻 / 评级 / 财报：暂无可靠数据。",
+        "",
+        "### 9. 财报日历与财报解读",
+        "- 已公布重点财报：暂无可靠数据。",
+        "- 接下来 1-3 个交易日重点财报：暂无可靠数据。",
+        "",
+        "### 10. 机构观点与资金流",
+        "- ETF 资金流 / 期权异动 / 大宗交易：暂无可靠数据。",
+        "- 可跟踪官方来源：Yahoo Finance、Nasdaq、公司 IR、SEC。",
+        "",
+        "### 11. 板块轮动判断",
+        "- 当前更像：{0}。".format(stage if score_ai >= 5 else "板块轮动"),
+        "- 资金流入：{0}。".format("半导体、AI电力链、核心成长" if score_ai >= 5 else "软件与等权修复"),
+        "- 资金流出：{0}。".format("防御板块" if (sector_quotes["公用事业"].day_change_pct or 0) < 0 else "相对弱势消费与地产"),
+        "",
+        "### 12. 我的重点关注股观察",
+        *[
+            "- {0}：{1}｜近5日 {2}｜近1月 {3}".format(
+                name,
+                trend_label(snap),
+                fmt_pct(snap.trailing_return(5)),
+                fmt_pct(snap.trailing_return(21)),
+            )
+            for name, snap in list(focus_quotes.items())[:15]
+        ],
+        "",
+        "### 13. 明日交易计划 / 观察清单",
+        "- 宏观：10Y 是否重新测试 4.60%-4.70%，DXY 是否继续走强。",
+        "- 大盘：QQQ 是否继续强于 SPY，IWM / RSP 是否确认宽度。",
+        "- 板块：SMH 是否继续强于 QQQ，IGV 是否补涨。",
+        "- 个股：NVDA、AVGO、MRVL、VRT、CEG、MSFT、ORCL、CRM、NOW、CRWD。",
+        "- 如果继续上涨：看 SOXX 与 QQQ 同步放量。",
+        "- 如果回调：先看 QQQ {0}、SPY {1} 能否守住。".format(qqq_support, spy_support),
+        "",
+        "### 14. 风险提示",
+        "- 美债收益率继续上行。",
+        "- 半导体高位拥挤与利好钝化。",
+        "- 指数强但内部宽度跟不上。",
+        "- 软件或其他成长财报不及预期。",
+        "- 美元走强压制风险资产。",
+        "",
+        "### 15. 最终结论",
+        "- 今日市场结论：{0}。".format(market_state),
+        "- 当前市场阶段：{0}。".format(stage),
+        "- 我的操作倾向：不追高，优先等宽度和利率确认后再决定是否加仓。",
+        "- 最值得关注的 5 个信号：",
+        "  1. 10Y 是否上破 4.60%",
+        "  2. SOXX 是否继续强于 QQQ",
+        "  3. IGV 是否出现补涨",
+        "  4. IWM 与 RSP 是否同步转强",
+        "  5. NVDA / AVGO / MRVL 是否维持强势结构",
+        "",
+        "## 来源",
+        "- Yahoo Finance: https://finance.yahoo.com/",
+        "- FRED: https://fred.stlouisfed.org/",
+    ]
+    return title, "\n".join(lines).strip() + "\n"
+
+
+def build_report_outputs() -> Tuple[str, List[str], str]:
+    dataset = fetch_report_dataset()
+    title, messages = build_report_messages(dataset)
+    _, detailed_report = build_detailed_report(dataset)
+    return title, messages, detailed_report
+
+
 def save_report_files(report_text: str, reports_dir: Path, report_date: str) -> Tuple[Path, Path]:
     reports_dir.mkdir(parents=True, exist_ok=True)
     markdown_path = reports_dir / "{0}.md".format(report_date)
@@ -809,15 +1066,14 @@ def main() -> int:
             )
             return 0
 
-        title, messages = build_report_messages()
+        title, messages, detailed_report_text = build_report_outputs()
         report_date = title.replace(REPORT_TITLE_PREFIX, "", 1)
-        report_text = "\n\n---\n\n".join(messages).strip() + "\n"
         reports_dir = Path(args.reports_dir).expanduser()
-        markdown_path, html_path = save_report_files(report_text, reports_dir, report_date)
+        markdown_path, html_path = save_report_files(detailed_report_text, reports_dir, report_date)
 
         state_path = Path(args.state_file).expanduser()
         state = load_state(state_path)
-        report_id = hashlib.sha256(report_text.encode("utf-8")).hexdigest()
+        report_id = hashlib.sha256(detailed_report_text.encode("utf-8")).hexdigest()
 
         if not args.force and state.get("last_sent_report_date") == report_date:
             print("Latest report for {0} already sent.".format(report_date))
