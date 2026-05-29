@@ -11,6 +11,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     env:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -30,6 +35,39 @@ jobs:
           else
             python send_latest_report.py --schedule-guard
           fi
+
+      - name: Detect generated report
+        id: report_status
+        run: |
+          if [ -f reports/latest.html ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare GitHub Pages site
+        if: steps.report_status.outputs.ready == 'true'
+        run: |
+          mkdir -p site/reports
+          cp reports/latest.html site/index.html
+          cp reports/*.html site/reports/
+          cp reports/*.md site/reports/ || true
+          touch site/.nojekyll
+
+      - name: Configure GitHub Pages
+        if: steps.report_status.outputs.ready == 'true'
+        uses: actions/configure-pages@v5
+
+      - name: Upload GitHub Pages artifact
+        if: steps.report_status.outputs.ready == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        if: steps.report_status.outputs.ready == 'true'
+        id: deployment
+        uses: actions/deploy-pages@v4
 
       - name: Upload report artifacts
         if: always()
