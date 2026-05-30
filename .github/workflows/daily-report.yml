@@ -2,8 +2,8 @@ name: US Market Daily Report
 
 on:
   schedule:
-    - cron: "35 21 * * *"
-    - cron: "35 22 * * *"
+    - cron: "35 8 * * 2-6"
+      timezone: "Australia/Melbourne"
   workflow_dispatch:
 
 jobs:
@@ -33,7 +33,7 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             python send_latest_report.py --force
           else
-            python send_latest_report.py --schedule-guard
+            python send_latest_report.py
           fi
 
       - name: Detect generated report
